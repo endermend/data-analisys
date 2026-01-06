@@ -1,0 +1,98 @@
+import os
+from random import randint, choices
+
+from sqlalchemy import create_engine, and_
+from sqlalchemy.orm import sessionmaker
+
+from . import generate_nick, generate_event
+from . import *
+
+events_cnt = 0
+players_cnt = 0
+
+
+def get_engine():
+    connection_string = os.getenv('DB_URL')
+    return create_engine(connection_string)
+
+
+def add_player(session):
+    global players_cnt
+    next_nick = generate_nick('en')
+    player = Players(name=next_nick)
+    session.add(player)
+    players_cnt += 1
+
+
+def add_event(session):
+    global events_cnt
+    next_event = generate_event()
+    event = Events(name=next_event, exp_gained=randint(0, 1000))
+    session.add(event)
+    events_cnt += 1
+
+
+def update_player_event(session, player_id, event_id):
+    player_event = session.query(PlayerEvents).where(and_(PlayerEvents.player == player_id,
+                                                      PlayerEvents.event == event_id)).first()
+    if player_event is None:
+        player_event = PlayerEvents(player=player_id, event=event_id)
+        session.add(player_event)
+    else:
+        player_event.repeats += 1
+
+
+def add_player_event(session):
+    global events_cnt
+    global players_cnt
+
+    if events_cnt == 0 or players_cnt == 0:
+        return
+    player_id = randint(1, players_cnt)
+    event_id = randint(1, events_cnt)
+    player = session.query(Players).filter_by(id = player_id).first()
+    event = session.query(Events).filter_by(id = event_id).first()
+    if player is None or event is None:
+        return
+    update_player_event(session, player_id, event_id)
+    exp_gained = event.exp_gained.copy() + player.exp
+    player.exp = 0
+    while exp_gained > 0:
+        level = session.query(Levels).filter_by(level = player.level).first()
+        next_level = session.query(Levels).filter_by(level = player.level + 1).first()
+        if exp_gained < level.lvlup_exp or next_level is None:
+            player.exp = exp_gained
+            break
+        exp_gained -= level.lvlup_exp
+        player.level += 1
+        if next_level.assigned_event is None:
+            continue
+        event = session.query(Events).filter_by(id = next_level.assigned_event).first()
+        update_player_event(session, player_id, event.id)
+        exp_gained += event.exp_gained
+
+def add_levels(session):
+    if session.query(func.count(Levels.level)).scalar() > 0:
+        return
+    event = Events(id=10000000, name='Its yours anniversary!', exp_gained=1000)
+    session.add(event)
+    for i in range(1, 21):
+        level = Levels(level=i, lvlup_exp=100 + 12 * (i - 1), assigned_event=10000000 if i % 10 == 0 else None)
+        session.add(level)
+
+def loop(session):
+    global events_cnt
+    global players_cnt
+    add_levels(session)
+    events = [add_event, add_player, add_player_event]
+    while True:
+        choices(events, [0.2, 0.1, 0.7])[0](session)
+        session.commit()
+
+
+if __name__ == "__main__":
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    SessionFactory = sessionmaker(bind=engine)
+    session = SessionFactory()
+    loop(session)

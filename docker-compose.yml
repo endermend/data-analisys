@@ -1,6 +1,72 @@
 version: "3.8"
 
+x-redash-service: &redash-service
+  image: redash/redash:25.8.0
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  environment:
+    REDASH_DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
+    REDASH_COOKIE_SECRET: 78787878
+    REDASH_SECRET_KEY: 88005553535
+    REDASH_REDIS_URL: redis://redis:6379/0
+    PYTHONUNBUFFERED: 0
+    REDASH_LOG_LEVEL: INFO
+  restart: unless-stopped
+  networks:
+      - redash-network
+
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - redash_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h localhost -U postgres -d postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - redash-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    volumes:
+      - redash_redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - redash-network
+    healthcheck:
+      test: [ "CMD-SHELL", "redis-cli ping | grep PONG" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+      start_interval: 5s
+    restart: unless-stopped
+  
+  redash-server:
+    <<: *redash-service
+    command: server
+    ports:
+      - "5000:5000"
+    
+  redash-worker:
+    <<: *redash-service
+    command: worker
+
   my-mysql:
     build:
       context: ./my-mysql/
@@ -29,52 +95,17 @@ services:
       context: ./my-gen/
       dockerfile: Dockerfile
     environment:
-      DB_URL: mysql+pymysql://root:221683@my-mysql:3306/app?charset=utf8mb4
+      DB_URL: mysql+pymysql://root:221683@my-mysql:3306/app
     depends_on:
       my-mysql:
         condition: service_healthy
     networks:
       - redash-network
-  
-  my-redis:
-    image: redis
-    container_name: my-redis
-    ports:
-      - "6379:6379"
-    networks:
-      - redash-network
-
-  my-redash:
-    image: redash/redash
-    container_name: my-redash
-    ports:
-      - "5000:5000"
-    environment:
-      REDASH_DATABASE_URL: mysql://root:221683@my-mysql:3306/app?charset=utf8mb4
-      REDASH_REDIS_URL: redis://my-redis:6379/0
-    depends_on:
-      my-redis:
-        condition: service_started
-      my-mysql:
-          condition: service_healthy
-    networks:
-      - redash-network
-  
-  redash_worker:
-    image: redash/redash:latest
-    command: worker
-    environment:
-      REDASH_DATABASE_URL: mysql://root:221683@my-mysql:3306/app
-      REDASH_REDIS_URL: redis://my-redis:6379/0
-      QUEUES: queries,scheduled_queries,celery
-      WORKERS_COUNT: 1
-    depends_on:
-      - my-redash
-      - my-redis
-    networks:
-      - redash-network
-    restart: always
       
 networks:
   redash-network:
     driver: bridge
+
+volumes:
+  redash_postgres_data:
+  redash_redis_data:

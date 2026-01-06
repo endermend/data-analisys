@@ -1,8 +1,9 @@
-import os
+import os, time
 from random import randint, choices
 
 from sqlalchemy import create_engine, and_
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
 
 from . import generate_nick, generate_event
 from . import *
@@ -13,8 +14,13 @@ players_cnt = 0
 
 def get_engine():
     connection_string = os.getenv('DB_URL')
-    return create_engine(connection_string)
-
+    for tries in range(10):
+        try:
+            engine = create_engine(connection_string)
+            return engine
+        except OperationalError  as e:
+            time.sleep(5)
+    exit(1)
 
 def add_player(session):
     global players_cnt
@@ -91,6 +97,7 @@ def loop(session):
 
 
 if __name__ == "__main__":
+    time.sleep(10)
     engine = get_engine()
     Base.metadata.create_all(engine)
     SessionFactory = sessionmaker(bind=engine)

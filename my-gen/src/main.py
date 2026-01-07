@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from . import *
 
 # Введение констант
-EVENT_WEIGHTS = [0.2, 0.1, 0.7]
+EVENT_WEIGHTS = [0.05, 0.02, 0.93]
 DB_RETRY_ATTEMPTS = 10
 DB_RETRY_DELAY = 5
 APP_START_DELAY = 10

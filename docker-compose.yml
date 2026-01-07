@@ -1,12 +1,6 @@
-version: "3.8"
-
+# Extension fields
 x-redash-service: &redash-service
   image: redash/redash:25.8.0
-  depends_on:
-    postgres:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
   environment:
     REDASH_DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
     REDASH_COOKIE_SECRET: 78787878
@@ -14,13 +8,21 @@ x-redash-service: &redash-service
     REDASH_REDIS_URL: redis://redis:6379/0
     PYTHONUNBUFFERED: 0
     REDASH_LOG_LEVEL: INFO
-  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
   networks:
-      - redash-network
+    - redash-network
+  restart: unless-stopped
 
+# Services
 services:
+  # Database services
   postgres:
     image: postgres:15-alpine
+    container_name: postgres
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
@@ -29,6 +31,8 @@ services:
       - "5432:5432"
     volumes:
       - redash_postgres_data:/var/lib/postgresql/data
+    networks:
+      - redash-network
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -h localhost -U postgres -d postgres" ]
       interval: 5s
@@ -36,16 +40,14 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
-    networks:
-      - redash-network
 
   redis:
     image: redis:7-alpine
     container_name: redis
-    volumes:
-      - redash_redis_data:/data
     ports:
       - "6379:6379"
+    volumes:
+      - redash_redis_data:/data
     networks:
       - redash-network
     healthcheck:
@@ -56,16 +58,6 @@ services:
       start_period: 30s
       start_interval: 5s
     restart: unless-stopped
-  
-  redash-server:
-    <<: *redash-service
-    command: server
-    ports:
-      - "5000:5000"
-    
-  redash-worker:
-    <<: *redash-service
-    command: worker
 
   my-mysql:
     build:
@@ -73,23 +65,37 @@ services:
       dockerfile: Dockerfile
     container_name: my-mysql
     environment:
-      MYSQL_USER: app_user
       MYSQL_ROOT_PASSWORD: 221683
+      MYSQL_USER: app_user
       MYSQL_PASSWORD: app_password
       MYSQL_DATABASE: app
     ports:
       - "3307:3306"
     expose:
       - "3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - redash-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p221683"]
       timeout: 30s
       retries: 10
       interval: 10s
       start_period: 40s
-    networks:
-        - redash-network
-  
+
+  # Redash services
+  redash-server:
+    <<: *redash-service
+    command: server
+    ports:
+      - "5000:5000"
+
+  redash-worker:
+    <<: *redash-service
+    command: worker
+
+  # Custom application services
   my-gen:
     build:
       context: ./my-gen/
@@ -102,11 +108,14 @@ services:
         condition: service_healthy
     networks:
       - redash-network
-      
+
+# Network configuration
 networks:
   redash-network:
     driver: bridge
 
+# Volume configuration
 volumes:
   redash_postgres_data:
   redash_redis_data:
+  mysql_data:
